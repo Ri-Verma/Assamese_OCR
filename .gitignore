@@ -1,0 +1,30 @@
+# Python Virtual Environment
+venv/
+
+# OS generated files
+*.pyc
+pycache/
+.DS_Store
+
+# Data -  You might want to keep some of this, but large datasets should be elsewhere
+data/test/images/
+data/test/labels/
+data/train/images/
+data/train/labels/
+data/val/images/
+data/val/labels/
+
+# Model data -  Trained models can be large
+trained_models/  #  Add this if you have a directory for trained models
+*.pth
+*.pt
+*.bin
+*.onnx
+
+# Log files
+*.log
+
+# Temporary files
+temp/
+*.tmp
+*.swp
