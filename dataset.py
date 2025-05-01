@@ -1,73 +1,141 @@
 import os
 import torch
+import random
 from torch.utils.data import Dataset
+from char_map import char_to_idx, idx_to_char
 from PIL import Image
-from char_map import char_to_idx
-from torchvision import transforms
 
 class AssameseOCRDataset(Dataset):
-    def __init__(self, img_dir, label_file, char_to_idx, transform=None):
+    def __init__(self, img_dir, label_file, char_to_idx, transform=None, max_images=None):
         self.img_dir = img_dir
         self.char_to_idx = char_to_idx
         self.transform = transform
+        self.max_images = max_images
 
-        # Read labels from central label file
+        self.image_files = []
         self.labels = {}
-        with open(label_file, 'r', encoding='utf-8') as f:
-            for line in f:
-                if line.strip():
-                    parts = line.strip().split('\t')
-                    if len(parts) != 2:
-                        continue
-                    filename, text = parts
-                    self.labels[filename] = text
 
-        # Keep only image files that have labels
-        self.image_files = [f for f in os.listdir(img_dir)
-                            if f.endswith('.jpeg') and f in self.labels]
+        if not os.path.exists(img_dir):
+            print(f"[ERROR] Image directory '{img_dir}' does not exist.")
+            return
+        if not os.path.exists(label_file):
+            print(f"[ERROR] Label file '{label_file}' does not exist.")
+            return
+
+        # Load labels from file
+        print(f"Loading labels from {label_file}...")
+        try:
+            with open(label_file, 'r', encoding='utf-8') as f:
+                for line_num, line in enumerate(f, 1):
+                    if line.strip():
+                        parts = line.strip().split('\t')
+                        if len(parts) != 2:
+                            print(f"[WARNING] Line {line_num} is malformed: {line.strip()}")
+                            continue
+                        filename, text = parts
+                        filename = os.path.basename(filename)
+                        base_name = os.path.splitext(filename)[0]
+                        text = text.replace('‌', '').replace('\t', '').replace(' ', '')  # Remove artifacts
+                        text = text[:25]  # Truncate to max 25 characters
+
+                        self.labels[filename] = text
+                        self.labels[base_name] = text
+                        if not any(filename.lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png']):
+                            self.labels[f"{filename}.jpeg"] = text
+                            self.labels[f"{base_name}.jpeg"] = text
+        except Exception as e:
+            print(f"[ERROR] Failed to read label file: {e}")
+            return
+
+        print(f"Loaded {len(set(self.labels.values()))} unique labels.")
+
+        # List image files
+        valid_extensions = ['.jpg', '.jpeg', '.png']
+        all_files = os.listdir(img_dir)
+        potential_images = [f for f in all_files if any(f.lower().endswith(ext) for ext in valid_extensions)]
+
+        print(f"Found {len(potential_images)} image files in directory.")
+
+        for img_file in potential_images:
+            base_name = os.path.splitext(img_file)[0]
+            if img_file in self.labels or base_name in self.labels:
+                self.image_files.append(img_file)
+
+        print(f"Matched {len(self.image_files)} images with labels.")
+
+        # Limit the dataset size if max_images is specified
+        if self.max_images is not None and len(self.image_files) > self.max_images:
+            print(f"Randomly selecting {self.max_images} images from {len(self.image_files)} available")
+            random.shuffle(self.image_files)
+            self.image_files = self.image_files[:self.max_images]
+            print(f"Dataset limited to {len(self.image_files)} images")
+
+        if not self.image_files:
+            print("\n[WARNING] No image-label matches found. Check:")
+            print(" - File names in label file and image folder")
+            print(" - UTF-8 encoding and label file format (filename<TAB>label)")
+            print(" - Presence of supported image extensions (.jpg, .jpeg, .png)")
+            print(f"\nSample image files: {potential_images[:5]}")
+            print(f"Sample label keys: {list(self.labels.keys())[:5]}")
 
     def __len__(self):
         return len(self.image_files)
 
     def __getitem__(self, idx):
-        img_name = self.image_files[idx]
-        img_path = os.path.join(self.img_dir, img_name)
+        img_file = self.image_files[idx]
+        img_path = os.path.join(self.img_dir, img_file)
+
+        # Retrieve label
+        label = self.labels.get(img_file)
+        if label is None:
+            base_name = os.path.splitext(img_file)[0]
+            label = self.labels.get(base_name)
+
+        if not label:
+            print(f"[WARNING] Skipping {img_file} due to missing or empty label.")
+            return None, None
 
         try:
-            img = Image.open(img_path).convert('L')
+            image = Image.open(img_path).convert('L')
         except Exception as e:
-            print(f"[ERROR] Failed to load image {img_name}: {e}")
-            return None
-
-        label = self.labels.get(img_name)
-        if label is None:
-            print(f"[ERROR] Label not found for image {img_name}")
-            return None
+            print(f"[ERROR] Failed to load image '{img_path}': {e}")
+            return None, None
 
         if self.transform:
-            img = self.transform(img)
+            image = self.transform(image)
+
+        if image is None or torch.isnan(image).any() or torch.isinf(image).any():
+            print(f"[ERROR] Invalid image tensor: {img_path}")
+            return None, None
 
         try:
-            label_encoded = [self.char_to_idx[c] for c in label]
+            label_encoded = [self.char_to_idx[c] for c in label if c in self.char_to_idx]
         except KeyError as e:
-            print(f"[ERROR] Unknown character '{e.args[0]}' in label for {img_name}")
-            return None
+            print(f"[ERROR] Unknown character '{e.args[0]}' in label for '{img_file}'")
+            return None, None
 
-        return img, torch.tensor(label_encoded, dtype=torch.long)
+        if len(label_encoded) == 0:
+            print(f"[WARNING] Skipping {img_file} due to no valid characters in label: {label}")
+            return None, None
+
+        print(f"Sample {img_file}: Label: {label}, Indices: {label_encoded}")
+        return image, torch.tensor(label_encoded, dtype=torch.long)
 
 def collate_fn(batch):
-    batch = [b for b in batch if b is not None]
+    batch = [b for b in batch if b is not None and len(b[1]) > 0]
     if len(batch) == 0:
-        return None
+        print("collate_fn: Empty batch after filtering")
+        return None, None, None, None
 
     images, labels = zip(*batch)
-    images = torch.stack(images, dim=0)
-
+    images = torch.stack(images)
+    _, _, h, w = images.shape
+    seq_len = w // 4  # CRNN downsampling
+    input_lengths = torch.full((len(batch),), seq_len, dtype=torch.long)
     target_lengths = torch.tensor([len(label) for label in labels], dtype=torch.long)
-    labels = torch.cat(labels)
-
-    batch_size, _, _, width = images.size()
-    cnn_output_width = width // 4
-    input_lengths = torch.full(size=(batch_size,), fill_value=cnn_output_width, dtype=torch.long)
-
-    return images, labels, input_lengths, target_lengths
+    labels_padded = torch.full((len(batch), max(target_lengths)), 
+                              len(char_to_idx), dtype=torch.long)
+    for i, label in enumerate(labels):
+        labels_padded[i, :len(label)] = label
+    print(f"collate_fn: Batch size: {len(images)}, Input lengths: {input_lengths}, Target lengths: {target_lengths}, Labels: {labels_padded}")
+    return images, labels_padded, input_lengths, target_lengths

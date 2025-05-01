@@ -11,6 +11,7 @@ import torch.optim as optim
 import torch.nn as nn
 import matplotlib.pyplot as plt
 import random
+import torch.multiprocessing as mp
 
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
@@ -18,12 +19,16 @@ os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"using device: {device}")
 
+# Define named function for transform to avoid pickling issues
+def nan_to_num(x):
+    return torch.nan_to_num(x, nan=0.0)
+
 # Image transforms
 transform = transforms.Compose([
     transforms.Resize((32, 100)),
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.5], std=[0.5]),
-    transforms.Lambda(lambda x: torch.nan_to_num(x, nan=0.0))
+    transforms.Lambda(nan_to_num)  # Use named function instead of lambda
 ])
 
 # ================== Critical Safety Checks ==================
@@ -153,7 +158,6 @@ class SafeCTCLoss(nn.Module):
 
 # ================== Training Setup ==================
 def main():
-    num_epochs = 20
     # Verify char_to_idx
     print(f"Number of characters in char_to_idx: {len(char_to_idx)}")
 
@@ -163,7 +167,7 @@ def main():
         label_file='data/train/labels/train_gt.txt',
         char_to_idx=char_to_idx,
         transform=transform,
-        max_images=79697
+        max_images=79000
     )
     val_dataset = SafeAssameseOCRDataset(
         img_dir='data/val/images',
@@ -181,7 +185,7 @@ def main():
 
     # Loaders
     train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True, 
-                             collate_fn=collate_fn, num_workers=0)
+                             collate_fn=collate_fn, num_workers=2)
     val_loader = DataLoader(val_dataset, batch_size=8, shuffle=False,
                             collate_fn=collate_fn, num_workers=2)
     test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False,
@@ -233,7 +237,7 @@ def main():
         return
 
     # Training loop
-    num_epochs = 50
+    num_epochs = 40
     best_val_loss = float('inf')
     train_losses = []
     val_losses = []
@@ -270,7 +274,7 @@ def main():
             
             optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 20)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 10)
             optimizer.step()
             
             total_loss += loss.item()
@@ -335,4 +339,5 @@ def main():
     plt.savefig('training_curve.png')
 
 if __name__ == "__main__":
+    mp.set_start_method('spawn', force=True)  # Explicitly set spawn for Windows
     main()
