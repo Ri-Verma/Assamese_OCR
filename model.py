@@ -28,10 +28,9 @@ class CRNN(nn.Module):
             nn.ReLU(),
             nn.MaxPool2d((2, 1), (2, 1))
         )
-        self.rnn1 = nn.LSTM(512, 256, bidirectional=True, batch_first=False,dropout=0.5)
-        self.rnn2 = nn.LSTM(512, 256, bidirectional=True, batch_first=False,dropout=0.5)
-        self.rnn3 = nn.LSTM(512, 256, bidirectional=True, batch_first=False,dropout=0.5)
-        self.fc = nn.Linear(512, nn_classes)
+        self.rnn = nn.LSTM(512,512,num_layers=3, bidirectional=True, dropout = 0.5)
+        self.embedding = nn.Linear(512 * 2, nn_classes)
+
         self._init_weights()
 
     def _init_weights(self):
@@ -54,7 +53,6 @@ class CRNN(nn.Module):
         b, c, h, w = x.size()
         x = x.view(b, c * h, w)
         x = x.permute(2, 0, 1)
-        x, _ = self.rnn1(x)
-        x, _ = self.rnn2(x)
-        x = self.fc(x)
+        x, _ = self.rnn(x)
+        x = self.embedding(x)
         return x

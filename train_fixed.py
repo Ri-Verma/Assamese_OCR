@@ -25,10 +25,17 @@ def nan_to_num(x):
 
 # Image transforms
 transform = transforms.Compose([
-    transforms.Resize((32, 100)),
+    transforms.Resize((32, 300)),
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.5], std=[0.5]),
-    transforms.Lambda(nan_to_num)  # Use named function instead of lambda
+    transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3),
+    transforms.RandomAffine(degrees=10, translate=(0.1, 0.1), scale=(0.8, 1.2)),
+    transforms.RandomApply([transforms.RandomChoice([
+        transforms.RandomAdjustSharpness(sharpness_factor=0.5),
+        transforms.RandomAdjustSharpness(sharpness_factor=2.0)
+    ])], p=0.3),
+    transforms.Lambda(nan_to_num),
+    transforms.RandomErasing(p=0.3, scale=(0.02, 0.1))  # Use named function instead of lambda
 ])
 
 # ================== Critical Safety Checks ==================
@@ -98,6 +105,10 @@ class SafeAssameseOCRDataset(AssameseOCRDataset):
 
 # ================== Model Setup ==================
 class SafeCRNN(CRNN):
+    def __init__(self, img_height, nn_classes):
+        super(SafeCRNN, self).__init__(img_height, nn_classes)
+        self._init_weights()
+    
     def _init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -115,6 +126,9 @@ class SafeCRNN(CRNN):
                         nn.init.orthogonal_(param.data)
                     elif 'bias' in name:
                         nn.init.constant_(param.data, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                nn.init.constant_(m.bias, 0)
     
     def forward(self, x):
         x = super().forward(x)
@@ -184,11 +198,11 @@ def main():
     print(f"Train dataset size: {len(train_dataset)}, Validation dataset size: {len(val_dataset)}, Test dataset size: {len(test_dataset)}")
 
     # Loaders
-    train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True, 
+    train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, 
                              collate_fn=collate_fn, num_workers=2)
-    val_loader = DataLoader(val_dataset, batch_size=8, shuffle=False,
+    val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False,
                             collate_fn=collate_fn, num_workers=2)
-    test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False,
+    test_loader = DataLoader(test_dataset, batch_size=16, shuffle=False,
                              collate_fn=collate_fn, num_workers=2)
     print(f"Train loader batches: {len(train_loader)}, Validation loader batches: {len(val_loader)}")
 
@@ -199,7 +213,7 @@ def main():
     model = model.to(device)
     
     # Optimizer
-    optimizer = optim.AdamW(model.parameters(), lr=0.00001, weight_decay=0.01)
+    optimizer = optim.AdamW(model.parameters(), lr=0.00005, weight_decay=0.01)
     criterion = SafeCTCLoss(blank=len(char_to_idx), reduction='mean')
     
     # Learning rate scheduler
@@ -237,7 +251,7 @@ def main():
         return
 
     # Training loop
-    num_epochs = 40
+    num_epochs = 50
     best_val_loss = float('inf')
     train_losses = []
     val_losses = []
