@@ -20,7 +20,7 @@ correction_dict = {
     'আগবাঢি': 'আগবাঢ়ি',
     'কিবাএটাধুনীয়াদিন': 'কিবা এটা ধুনীয়া দিন।',
     'য‌া‌ি': 'জাতি',
-    '।': '<empty>'  # Handle single punctuation
+    '।': '<empty>'  
 }
 
 def decode_output(output, char_map, idx_to_char):

@@ -2,7 +2,6 @@ import os
 import torch
 import random
 from torch.utils.data import Dataset
-from char_map import char_to_idx, idx_to_char
 from PIL import Image
 
 class AssameseOCRDataset(Dataset):
@@ -22,7 +21,6 @@ class AssameseOCRDataset(Dataset):
             print(f"[ERROR] Label file '{label_file}' does not exist.")
             return
 
-        # Load labels from file
         print(f"Loading labels from {label_file}...")
         try:
             with open(label_file, 'r', encoding='utf-8') as f:
@@ -35,8 +33,8 @@ class AssameseOCRDataset(Dataset):
                         filename, text = parts
                         filename = os.path.basename(filename)
                         base_name = os.path.splitext(filename)[0]
-                        text = text.replace('‌', '').replace('\t', '').replace(' ', '')  # Remove artifacts
-                        text = text[:25]  # Truncate to max 25 characters
+                        text = text.replace('‌', '').replace('\t', '').replace(' ', '')  # Clean text
+                        text = text[:25]
 
                         self.labels[filename] = text
                         self.labels[base_name] = text
@@ -49,7 +47,6 @@ class AssameseOCRDataset(Dataset):
 
         print(f"Loaded {len(set(self.labels.values()))} unique labels.")
 
-        # List image files
         valid_extensions = ['.jpg', '.jpeg', '.png']
         all_files = os.listdir(img_dir)
         potential_images = [f for f in all_files if any(f.lower().endswith(ext) for ext in valid_extensions)]
@@ -63,7 +60,6 @@ class AssameseOCRDataset(Dataset):
 
         print(f"Matched {len(self.image_files)} images with labels.")
 
-        # Limit the dataset size if max_images is specified
         if self.max_images is not None and len(self.image_files) > self.max_images:
             print(f"Randomly selecting {self.max_images} images from {len(self.image_files)} available")
             random.shuffle(self.image_files)
@@ -85,14 +81,13 @@ class AssameseOCRDataset(Dataset):
         img_file = self.image_files[idx]
         img_path = os.path.join(self.img_dir, img_file)
 
-        # Retrieve label
         label = self.labels.get(img_file)
         if label is None:
             base_name = os.path.splitext(img_file)[0]
             label = self.labels.get(base_name)
 
         if not label:
-            print(f"[WARNING] Skipping {img_file} due to missing or empty label.")
+            print(f"[WARNING] Skipping {img_file} due to missing label.")
             return None, None
 
         try:
@@ -118,24 +113,23 @@ class AssameseOCRDataset(Dataset):
             print(f"[WARNING] Skipping {img_file} due to no valid characters in label: {label}")
             return None, None
 
-        print(f"Sample {img_file}: Label: {label}, Indices: {label_encoded}")
         return image, torch.tensor(label_encoded, dtype=torch.long)
 
+# Correct collate_fn (NO label padding)
 def collate_fn(batch):
     batch = [b for b in batch if b is not None and len(b[1]) > 0]
     if len(batch) == 0:
-        print("collate_fn: Empty batch after filtering")
         return None, None, None, None
 
     images, labels = zip(*batch)
     images = torch.stack(images)
+
+    # Flatten labels
+    flattened_labels = torch.cat(labels)
+    target_lengths = torch.tensor([len(label) for label in labels], dtype=torch.long)
+
     _, _, h, w = images.shape
     seq_len = w // 4  # CRNN downsampling
-    input_lengths = torch.full((len(batch),), seq_len, dtype=torch.long)
-    target_lengths = torch.tensor([len(label) for label in labels], dtype=torch.long)
-    labels_padded = torch.full((len(batch), max(target_lengths)), 
-                              len(char_to_idx), dtype=torch.long)
-    for i, label in enumerate(labels):
-        labels_padded[i, :len(label)] = label
-    print(f"collate_fn: Batch size: {len(images)}, Input lengths: {input_lengths}, Target lengths: {target_lengths}, Labels: {labels_padded}")
-    return images, labels_padded, input_lengths, target_lengths
+    input_lengths = torch.full((len(images),), seq_len, dtype=torch.long)
+
+    return images, flattened_labels, input_lengths, target_lengths
