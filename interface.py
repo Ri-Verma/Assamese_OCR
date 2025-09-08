@@ -2,12 +2,11 @@ import argparse
 import torch
 from PIL import Image, ImageEnhance
 import pdf2image
-import numpy as np
 from torchvision import transforms
 from train_fixed import SafeCRNN
 from char_map import char_to_idx, idx_to_char
 import logging
-import os
+
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

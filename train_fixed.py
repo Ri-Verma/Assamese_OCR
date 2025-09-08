@@ -1,8 +1,6 @@
 import os
 import torch
-import numpy as np
 from torch.utils.data import DataLoader
-from PIL import Image
 from char_map import char_to_idx, idx_to_char
 from torchvision import transforms
 from dataset import AssameseOCRDataset, collate_fn
@@ -10,7 +8,6 @@ from model import CRNN
 import torch.optim as optim
 import torch.nn as nn
 import matplotlib.pyplot as plt
-import random
 import torch.multiprocessing as mp
 
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
@@ -35,7 +32,7 @@ transform = transforms.Compose([
         transforms.RandomAdjustSharpness(sharpness_factor=2.0)
     ])], p=0.3),
     transforms.Lambda(nan_to_num),
-    transforms.RandomErasing(p=0.3, scale=(0.02, 0.1))  # Use named function instead of lambda
+    transforms.RandomErasing(p=0.3, scale=(0.02, 0.1))  
 ])
 
 # ================== Critical Safety Checks ==================
@@ -353,5 +350,5 @@ def main():
     plt.savefig('training_curve.png')
 
 if __name__ == "__main__":
-    mp.set_start_method('spawn', force=True)  # Explicitly set spawn for Windows
+    mp.set_start_method('spawn', force=True)  
     main()

@@ -129,7 +129,7 @@ def collate_fn(batch):
     target_lengths = torch.tensor([len(label) for label in labels], dtype=torch.long)
 
     _, _, h, w = images.shape
-    seq_len = w // 4  # CRNN downsampling
+    seq_len = w // 4  
     input_lengths = torch.full((len(images),), seq_len, dtype=torch.long)
 
     return images, flattened_labels, input_lengths, target_lengths
